@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A2A Legal Multi-Agent Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <div class="dashboard">
+      <!-- Left Column: Agent Network Map -->
+      <section class="network-panel">
+        <header class="panel-header">
+          <h2>🌐 Agent Network Flow</h2>
+          <span class="status-badge" id="systemStatus">
+            <span class="pulse"></span> Ready
+          </span>
+        </header>
+        
+        <div class="network-graph">
+          <!-- Customer Agent -->
+          <div class="agent-node" id="node-customer">
+            <div class="icon">📋</div>
+            <div class="details">
+              <h3>Customer Agent</h3>
+              <p>Entry Point & Routing</p>
+            </div>
+          </div>
+
+          <div class="connector vertical" id="conn-cust-split"></div>
+
+          <!-- Parallel Processing Row -->
+          <div class="parallel-container">
+            <div class="connector horizontal-left" id="conn-split-law"></div>
+            <div class="connector horizontal-right" id="conn-split-tax"></div>
+            
+            <div class="agent-node" id="node-law">
+              <div class="icon">⚖️</div>
+              <div class="details">
+                <h3>Law Agent</h3>
+                <p>Legal Analysis</p>
+              </div>
+            </div>
+
+            <div class="agent-node" id="node-tax">
+              <div class="icon">💰</div>
+              <div class="details">
+                <h3>Tax Agent</h3>
+                <p>Tax Risk Analysis</p>
+              </div>
+            </div>
+
+            <div class="agent-node" id="node-compliance">
+              <div class="icon">📜</div>
+              <div class="details">
+                <h3>Compliance Agent</h3>
+                <p>Regulatory Checks</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="connector-merge-container">
+             <div class="connector merge-left" id="conn-law-agg"></div>
+             <div class="connector merge-center" id="conn-tax-agg"></div>
+             <div class="connector merge-right" id="conn-comp-agg"></div>
+          </div>
+
+          <!-- Aggregate -->
+          <div class="agent-node" id="node-aggregate">
+            <div class="icon">📊</div>
+            <div class="details">
+              <h3>Aggregate</h3>
+              <p>Synthesis & Response</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Chat Interface -->
+      <section class="chat-panel">
+        <header class="chat-header">
+          <div class="header-content">
+            <div class="logo">⚖️</div>
+            <div class="title-container">
+              <h1>Legal Multi-Agent AI</h1>
+              <p class="subtitle">Powered by Google A2A Protocol</p>
+            </div>
+          </div>
+        </header>
+
+        <main class="chat-area" id="chatArea">
+          <div class="message system-msg">
+            <div class="avatar">🤖</div>
+            <div class="bubble">
+              <p>Welcome to the Legal Multi-Agent System!</p>
+              <p>I will route your legal questions to our specialist agents working in <strong>parallel</strong>. Watch the network map on the left to see us in action!</p>
+            </div>
+          </div>
+        </main>
+
+        <footer class="input-area">
+          <form id="chatForm">
+            <div class="input-wrapper">
+              <textarea id="promptInput" placeholder="Ask a legal question... (e.g., If a company breaks a contract and avoids taxes...)" rows="1"></textarea>
+              <button type="submit" id="sendBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              </button>
+            </div>
+          </form>
+        </footer>
+      </section>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
