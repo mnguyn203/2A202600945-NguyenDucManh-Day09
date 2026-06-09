@@ -116,6 +116,7 @@ class LegalState(TypedDict):
     needs_compliance: bool
     tax_result: Annotated[str, _last_wins]
     compliance_result: Annotated[str, _last_wins]
+    privacy_analysis: Annotated[str, _last_wins]
     final_answer: str
 
 
@@ -181,10 +182,15 @@ async def check_routing(state: LegalState) -> dict:
 def route_to_specialists(state: LegalState) -> list[Send]:
     """Routing function: dispatch parallel Send objects to specialist nodes."""
     sends: list[Send] = []
-    if state.get("needs_tax"):
+    question_lower = state["question"].lower()
+    
+    if state.get("needs_tax") or any(kw in question_lower for kw in ["tax", "irs", "thuế"]):
         sends.append(Send("call_tax_specialist", state))
-    if state.get("needs_compliance"):
+    if state.get("needs_compliance") or any(kw in question_lower for kw in ["compliance", "sec", "regulation"]):
         sends.append(Send("call_compliance_specialist", state))
+    if any(kw in question_lower for kw in ["data", "privacy", "gdpr", "dữ liệu"]):
+        sends.append(Send("call_privacy_specialist", state))
+        
     if not sends:
         sends.append(Send("aggregate", state))
     return sends
@@ -235,6 +241,22 @@ async def call_compliance_specialist(state: LegalState) -> dict:
     return {"compliance_result": final_msg}
 
 
+async def call_privacy_specialist(state: LegalState) -> dict:
+    """Agent chuyên về luật bảo vệ dữ liệu cá nhân."""
+    print("\n  [Node: call_privacy_specialist] Privacy specialist agent starting...")
+    llm = get_llm()
+    prompt = f"""Bạn là chuyên gia về GDPR và luật bảo vệ dữ liệu cá nhân.
+    
+Câu hỏi gốc: {state['question']}
+Phân tích pháp lý: {state.get('law_analysis', 'N/A')}
+
+Hãy phân tích các vấn đề về privacy và GDPR (nếu có).
+"""
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
+    print(f"  [Node: call_privacy_specialist] Done ({len(response.content)} chars)")
+    return {"privacy_analysis": response.content}
+
+
 async def aggregate(state: LegalState) -> dict:
     """Combine all specialist analyses into a final comprehensive answer."""
     print("\n  [Node: aggregate] Combining all specialist analyses...")
@@ -247,6 +269,8 @@ async def aggregate(state: LegalState) -> dict:
         sections.append(f"## Tax Analysis\n{state['tax_result']}")
     if state.get("compliance_result"):
         sections.append(f"## Regulatory Compliance Analysis\n{state['compliance_result']}")
+    if state.get("privacy_analysis"):
+        sections.append(f"## Privacy Analysis\n{state['privacy_analysis']}")
 
     combined = "\n\n---\n\n".join(sections)
 
@@ -278,6 +302,7 @@ def create_graph():
     graph.add_node("check_routing", check_routing)
     graph.add_node("call_tax_specialist", call_tax_specialist)
     graph.add_node("call_compliance_specialist", call_compliance_specialist)
+    graph.add_node("call_privacy_specialist", call_privacy_specialist)
     graph.add_node("aggregate", aggregate)
 
     graph.set_entry_point("analyze_law")
@@ -285,10 +310,11 @@ def create_graph():
     graph.add_conditional_edges(
         "check_routing",
         route_to_specialists,
-        ["call_tax_specialist", "call_compliance_specialist", "aggregate"],
+        ["call_tax_specialist", "call_compliance_specialist", "call_privacy_specialist", "aggregate"],
     )
     graph.add_edge("call_tax_specialist", "aggregate")
     graph.add_edge("call_compliance_specialist", "aggregate")
+    graph.add_edge("call_privacy_specialist", "aggregate")
     graph.add_edge("aggregate", END)
 
     return graph.compile()
@@ -323,6 +349,7 @@ async def main():
         "needs_compliance": False,
         "tax_result": "",
         "compliance_result": "",
+        "privacy_analysis": "",
         "final_answer": "",
     })
 

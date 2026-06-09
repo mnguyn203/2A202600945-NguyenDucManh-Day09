@@ -71,64 +71,54 @@ async def analyze_law(state: LawState) -> dict:
 async def check_routing(state: LawState) -> dict:
     """Determine whether tax and/or compliance sub-agents are needed.
 
-    Returns updated state flags so the routing function can read them.
-    If delegation depth is already at the max, skip further delegation.
+    OPTIMIZED: Uses keyword matching instead of LLM call to save ~10s latency.
+    Previously this was a full LLM round-trip just to return a JSON boolean.
     """
     depth = state.get("delegation_depth", 0)
     if depth >= MAX_DELEGATION_DEPTH:
         logger.info("Max delegation depth reached (%d); skipping sub-agents", depth)
         return {"needs_tax": False, "needs_compliance": False}
 
-    llm = get_llm()
-    messages = [
-        SystemMessage(
-            content=(
-                'You are a legal routing expert. Based on the question, decide whether '
-                'specialist sub-agents are needed.\n'
-                'Reply with ONLY valid JSON — no markdown, no extra text:\n'
-                '{"needs_tax": <true|false>, "needs_compliance": <true|false>}\n\n'
-                'needs_tax = true  → question involves tax law, IRS, tax evasion, penalties\n'
-                'needs_compliance = true → question involves regulatory compliance, SEC, SOX, AML, FCPA'
-            )
-        ),
-        HumanMessage(content=state["question"]),
+    question_lower = state["question"].lower()
+
+    tax_keywords = [
+        "tax", "irs", "evasion", "avoidance", "penalty", "revenue",
+        "offshore", "fbar", "fatca", "transfer pricing",
+        "thuế", "trốn thuế", "thu nhập",
     ]
-    result = await llm.ainvoke(messages)
-    raw = result.content.strip()
+    compliance_keywords = [
+        "compliance", "sec", "sox", "sarbanes", "ftc", "fcpa",
+        "aml", "bribery", "gdpr", "ccpa", "privacy", "data",
+        "regulation", "regulatory", "governance",
+        "tuân thủ", "quy định",
+    ]
 
-    # Strip markdown code fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
+    needs_tax = any(kw in question_lower for kw in tax_keywords)
+    needs_compliance = any(kw in question_lower for kw in compliance_keywords)
 
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.warning("Routing LLM returned non-JSON: %r — defaulting to both=True", raw)
-        parsed = {"needs_tax": True, "needs_compliance": True}
+    # Default: if no keywords matched, send to both (safe fallback)
+    if not needs_tax and not needs_compliance:
+        needs_tax = True
+        needs_compliance = True
 
-    needs_tax = bool(parsed.get("needs_tax", True))
-    needs_compliance = bool(parsed.get("needs_compliance", True))
-    logger.info("Routing decision: needs_tax=%s needs_compliance=%s", needs_tax, needs_compliance)
+    logger.info("Routing decision (keyword-based): needs_tax=%s needs_compliance=%s", needs_tax, needs_compliance)
     return {"needs_tax": needs_tax, "needs_compliance": needs_compliance}
 
 
 def route_to_subagents(state: LawState) -> list[Send]:
     """Routing function: dispatch parallel Send objects based on routing flags.
 
-    This function is used with add_conditional_edges; it returns a list of
-    Send objects which LangGraph executes as parallel branches.
+    OPTIMIZED: analyze_law now runs IN PARALLEL with tax + compliance,
+    instead of sequentially before them. This saves ~15s because keyword
+    routing doesn't need the law_analysis output to make its decision.
     """
     sends: list[Send] = []
+    # Always run law analysis
+    sends.append(Send("analyze_law", state))
     if state.get("needs_tax"):
         sends.append(Send("call_tax", state))
     if state.get("needs_compliance"):
         sends.append(Send("call_compliance", state))
-    if not sends:
-        # No sub-agents needed — go straight to aggregation
-        sends.append(Send("aggregate", state))
     return sends
 
 
@@ -209,26 +199,34 @@ async def aggregate(state: LawState) -> dict:
 # ---------------------------------------------------------------------------
 
 def create_graph():
-    """Build and compile the Law Agent StateGraph."""
+    """Build and compile the Law Agent StateGraph.
+    
+    OPTIMIZED topology:
+        check_routing → PARALLEL [analyze_law + call_tax + call_compliance] → aggregate → END
+    
+    Previously: analyze_law → check_routing → [call_tax + call_compliance] → aggregate → END
+    Savings: ~15s by running analyze_law in parallel instead of sequentially.
+    """
     graph = StateGraph(LawState)
 
-    graph.add_node("analyze_law", analyze_law)
     graph.add_node("check_routing", check_routing)
+    graph.add_node("analyze_law", analyze_law)
     graph.add_node("call_tax", call_tax)
     graph.add_node("call_compliance", call_compliance)
     graph.add_node("aggregate", aggregate)
 
-    graph.set_entry_point("analyze_law")
-    graph.add_edge("analyze_law", "check_routing")
+    # Entry point: keyword routing (instant, no LLM call)
+    graph.set_entry_point("check_routing")
 
-    # Conditional parallel dispatch: after check_routing, route_to_subagents
-    # returns a list of Send objects (to call_tax, call_compliance, or aggregate)
+    # After routing, dispatch ALL branches in parallel (including analyze_law)
     graph.add_conditional_edges(
         "check_routing",
         route_to_subagents,
-        ["call_tax", "call_compliance", "aggregate"],
+        ["analyze_law", "call_tax", "call_compliance"],
     )
 
+    # All parallel branches converge to aggregate
+    graph.add_edge("analyze_law", "aggregate")
     graph.add_edge("call_tax", "aggregate")
     graph.add_edge("call_compliance", "aggregate")
     graph.add_edge("aggregate", END)
